@@ -1,6 +1,6 @@
-# Puja's Beauty Parlour Booking System
+# Beauty Parlour Booking System
 
-A WhatsApp-based booking system for Puja's Beauty Parlour that handles customer appointments, notifications, and calendar management.
+A WhatsApp-based booking system for a beauty parlour that handles customer appointments, notifications, and calendar management.
 
 ## Features
 
@@ -63,7 +63,6 @@ A WhatsApp-based booking system for Puja's Beauty Parlour that handles customer 
    - Service selection
    - Preferred date and time
    - Address
-   - Phone number
 3. Bot validates all information
 4. Customer confirms booking
 5. System:
