@@ -4,139 +4,402 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Puja's Beauty Parlour AI Agent</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
             margin: 0;
             display: flex;
             justify-content: center;
             align-items: center;
             min-height: 100vh;
-            background-color: #f0f2f5;
+            background-color: #efeae2;
+            color: #111b21;
         }
+
         .chat-wrapper {
-            background-color: white;
-            border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-            width: 90%;
-            max-width: 700px;
-            height: 85vh; /* Fixed height for the chat window */
+            background-color: #fff;
+            width: 95%;
+            max-width: 800px;
+            height: 90vh;
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            border-radius: 12px;
         }
+
         .chat-header {
-            background-color: #4CAF50; /* A pleasant green */
+            background-color: #075e54;
             color: white;
-            padding: 15px;
-            text-align: center;
-            font-size: 1.2em;
-            font-weight: bold;
-            border-bottom: 1px solid #ddd;
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            height: 60px;
+            position: relative;
+            z-index: 2;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
+
+        .chat-header::before {
+            content: '';
+            width: 40px;
+            height: 40px;
+            background-color: #fff;
+            border-radius: 50%;
+            margin-right: 12px;
+            background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23075e54"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg>');
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .chat-header-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            letter-spacing: -0.2px;
+        }
+
         #chat-box {
             flex-grow: 1;
             padding: 20px;
             overflow-y: auto;
             display: flex;
             flex-direction: column;
-            gap: 10px; /* Space between messages */
+            gap: 8px;
+            background-color: #efeae2;
+            background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M50 50l-10-10l10-10l10 10z' fill='%23e2d9d0' fill-opacity='0.4'/%3E%3C/svg%3E");
         }
+
         .message {
-            padding: 10px 15px;
-            border-radius: 20px;
-            max-width: 70%;
+            padding: 8px 12px;
+            border-radius: 7.5px;
+            max-width: 75%;
             word-wrap: break-word;
-            line-height: 1.5;
+            line-height: 1.4;
+            font-size: 14.2px;
+            position: relative;
+            animation: fadeIn 0.3s ease;
+            box-shadow: 0 1px 0.5px rgba(0, 0, 0, 0.13);
+            white-space: pre-line;
         }
+
+        .message::before {
+            content: '';
+            position: absolute;
+            width: 0;
+            height: 0;
+            border: 8px solid transparent;
+            top: 0;
+        }
+
         .user-message {
-            background-color: #e1ffc7; /* Light green */
+            background-color: #e1ffc7;
             align-self: flex-end;
-            border-bottom-right-radius: 5px;
+            margin-left: 40px;
+            border-top-right-radius: 7.5px;
+            border-bottom-right-radius: 4px;
         }
+
+        .user-message::before {
+            right: -7px;
+            border-left-color: #e1ffc7;
+            border-width: 10px;
+            border-top-width: 0;
+        }
+
         .bot-message {
-            background-color: #f1f0f0; /* Light gray */
+            background-color: #ffffff;
             align-self: flex-start;
-            border-bottom-left-radius: 5px;
+            margin-right: 40px;
+            border-top-left-radius: 7.5px;
+            border-bottom-left-radius: 4px;
         }
+
+        .bot-message::before {
+            left: -7px;
+            border-right-color: #ffffff;
+            border-width: 10px;
+            border-top-width: 0;
+        }
+
+        .typing-indicator {
+            padding: 12px 16px;
+            background-color: #ffffff;
+            border-radius: 7.5px;
+            display: none;
+            align-self: flex-start;
+            margin-right: 40px;
+            box-shadow: 0 1px 0.5px rgba(0, 0, 0, 0.13);
+        }
+
+        .typing-indicator span {
+            height: 8px;
+            width: 8px;
+            background: #93918f;
+            display: inline-block;
+            border-radius: 50%;
+            margin: 0 1px;
+            animation: bounce 1.3s linear infinite;
+            opacity: 0.6;
+        }
+
+        .typing-indicator span:nth-child(2) { animation-delay: 0.15s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.3s; }
+
         .input-area {
             display: flex;
-            padding: 15px;
-            border-top: 1px solid #eee;
-            background-color: #f9f9f9;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-top: 1px solid rgba(0, 0, 0, 0.08);
+            position: relative;
+            height: 62px;
+            align-items: center;
+            gap: 8px;
         }
+
         #user-input {
             flex-grow: 1;
-            padding: 12px 18px;
-            border: 1px solid #ccc;
-            border-radius: 25px;
-            margin-right: 10px;
-            font-size: 1em;
+            padding: 9px 12px;
+            border: 1px solid transparent;
+            border-radius: 21px;
+            font-size: 15px;
             outline: none;
-            transition: border-color 0.3s;
+            transition: all 0.3s ease;
+            background-color: #fff;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+            font-family: inherit;
         }
+
         #user-input:focus {
-            border-color: #4CAF50;
+            border-color: #075e54;
+            box-shadow: 0 1px 3px rgba(7, 94, 84, 0.2);
         }
-        button {
-            padding: 12px 25px;
-            background-color: #4CAF50;
+
+        .send-button {
+            width: 40px;
+            height: 40px;
+            background-color: #075e54;
             color: white;
             border: none;
-            border-radius: 25px;
-            cursor: pointer;
-            font-size: 1em;
-            font-weight: bold;
-            transition: background-color 0.3s ease, transform 0.1s ease;
-        }
-        button:hover {
-            background-color: #45a049;
-        }
-        button:active {
-            transform: translateY(1px);
-        }
-        button:disabled {
-            background-color: #cccccc;
-            cursor: not-allowed;
-        }
-        .loader {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #4CAF50;
             border-radius: 50%;
-            width: 18px;
-            height: 18px;
-            animation: spin 1s linear infinite;
-            margin-left: 10px;
-            display: none; /* Hidden by default */
-            align-self: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
         }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+
+        .send-button svg {
+            width: 20px;
+            height: 20px;
+            fill: currentColor;
+            transform: translateX(1px);
+        }
+
+        .send-button:hover {
+            background-color: #128c7e;
+            transform: scale(1.05);
+        }
+
+        .send-button:active {
+            transform: scale(0.95);
+        }
+
+        .booking-details {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding: 4px 0;
+        }
+
+        .booking-details-header {
+            font-weight: 600;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .booking-details-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        @keyframes bounce {
+            0%, 60%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-4px); }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        #chat-box::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        #chat-box::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        #chat-box::-webkit-scrollbar-thumb {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 3px;
+        }
+
+        @media (max-width: 768px) {
+            .chat-wrapper {
+                width: 100%;
+                height: 100vh;
+                border-radius: 0;
+            }
+
+            .message {
+                max-width: 85%;
+            }
         }
     </style>
 </head>
 <body>
     <div class="chat-wrapper">
         <div class="chat-header">
-            Puja's Beauty Parlour AI Agent
+            <div class="chat-header-title">Puja's Beauty Parlour AI Agent</div>
         </div>
         <div id="chat-box"></div>
+        <div class="typing-indicator">
+            <span></span>
+            <span></span>
+            <span></span>
+        </div>
         <div class="input-area">
             <input type="text" id="user-input" placeholder="Type your message..." autofocus>
-            <button onclick="sendMessage()">Send</button>
-            <div id="loader" class="loader"></div>
+            <button class="send-button">
+                <svg viewBox="0 0 24 24">
+                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                </svg>
+            </button>
         </div>
     </div>
 
     <script>
-        let conversationHistory = []; // Stores the chat history
+        let conversationHistory = [];
         const chatBox = document.getElementById('chat-box');
         const userInput = document.getElementById('user-input');
-        const sendButton = document.querySelector('button');
-        const loader = document.getElementById('loader');
+        const sendButton = document.querySelector('.send-button');
+        const typingIndicator = document.querySelector('.typing-indicator');
 
-        // Allow sending message with Enter key
+        const BUSINESS_HOURS = {
+            start: 9,
+            end: 20
+        };
+
+        function formatBookingDetails(text) {
+            if (text.includes('Booking Details')) {
+                const parts = text.split('Would you like me to go ahead');
+                if (parts.length > 1) {
+                    let details = parts[0].trim();
+                    
+                    details = details.replace(/📋|👤|💅|📅|⏰|📍/g, '\n$&');
+                    
+                    return details + '\n\nWould you like me to go ahead' + parts[1];
+                }
+            }
+            return text;
+        }
+
+        function isWithinBusinessHours(time) {
+            let hours = 0;
+            let minutes = 0;
+            let timeStr = time.toLowerCase().trim();
+            
+            // Handle various time formats
+            const timeFormats = {
+                // 10am, 10 am, 10AM, 10 AM
+                simple: /^(\d{1,2})\s*(am|pm)$/i,
+                // 10:30am, 10:30 am, 10:30AM, 10:30 AM
+                withMinutes: /^(\d{1,2}):(\d{2})\s*(am|pm)$/i,
+                // 24-hour format: 13:00, 0900, 09:00
+                military: /^(\d{1,2}):?(\d{2})$/
+            };
+
+            if (timeFormats.withMinutes.test(timeStr)) {
+                const [_, h, m, meridian] = timeStr.match(timeFormats.withMinutes);
+                hours = parseInt(h);
+                minutes = parseInt(m);
+                if (meridian.toLowerCase() === 'pm' && hours !== 12) hours += 12;
+                if (meridian.toLowerCase() === 'am' && hours === 12) hours = 0;
+            } else if (timeFormats.simple.test(timeStr)) {
+                const [_, h, meridian] = timeStr.match(timeFormats.simple);
+                hours = parseInt(h);
+                if (meridian.toLowerCase() === 'pm' && hours !== 12) hours += 12;
+                if (meridian.toLowerCase() === 'am' && hours === 12) hours = 0;
+            } else if (timeFormats.military.test(timeStr)) {
+                const [_, h, m] = timeStr.match(timeFormats.military);
+                hours = parseInt(h);
+                minutes = parseInt(m);
+            } else {
+                // If no format matches, try to extract just numbers
+                const nums = timeStr.match(/\d+/);
+                if (nums) hours = parseInt(nums[0]);
+            }
+
+            // Validate hours and minutes
+            if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+                return false;
+            }
+
+            return hours >= BUSINESS_HOURS.start && hours < BUSINESS_HOURS.end;
+        }
+
+        function formatTime(timeStr) {
+            // This function ensures consistent time format output
+            let hours = 0;
+            let minutes = 0;
+            let timeString = timeStr.toLowerCase().trim();
+            
+            const timeFormats = {
+                withMinutes: /^(\d{1,2}):(\d{2})\s*(am|pm)$/i,
+                simple: /^(\d{1,2})\s*(am|pm)$/i,
+                military: /^(\d{1,2}):?(\d{2})$/
+            };
+
+            if (timeFormats.withMinutes.test(timeString)) {
+                const [_, h, m, meridian] = timeString.match(timeFormats.withMinutes);
+                hours = parseInt(h);
+                minutes = parseInt(m);
+                if (meridian.toLowerCase() === 'pm' && hours !== 12) hours += 12;
+                if (meridian.toLowerCase() === 'am' && hours === 12) hours = 0;
+            } else if (timeFormats.simple.test(timeString)) {
+                const [_, h, meridian] = timeString.match(timeFormats.simple);
+                hours = parseInt(h);
+                if (meridian.toLowerCase() === 'pm' && hours !== 12) hours += 12;
+                if (meridian.toLowerCase() === 'am' && hours === 12) hours = 0;
+            } else if (timeFormats.military.test(timeString)) {
+                const [_, h, m] = timeString.match(timeFormats.military);
+                hours = parseInt(h);
+                minutes = parseInt(m);
+            }
+
+            // Convert to 12-hour format
+            let period = hours >= 12 ? 'PM' : 'AM';
+            hours = hours % 12;
+            hours = hours ? hours : 12; // Convert 0 to 12
+
+            // Format minutes
+            const minutesStr = minutes ? `:${minutes.toString().padStart(2, '0')}` : ':00';
+            
+            return `${hours}${minutesStr} ${period}`;
+        }
+
         userInput.addEventListener('keypress', function(event) {
             if (event.key === 'Enter') {
                 sendMessage();
@@ -147,18 +410,47 @@
             const message = userInput.value.trim();
             if (message === '') return;
 
+            // Check for time patterns
+            const timeRegex = /\b((1[0-2]|0?[1-9])(?::[0-5][0-9])?\s*[AaPp][Mm]|([01]?[0-9]|2[0-3])(?::[0-5][0-9])?)\b/;
+            const timeMatch = message.match(timeRegex);
+            
+            if (timeMatch) {
+                const time = timeMatch[0];
+                if (!isWithinBusinessHours(time)) {
+                    displayMessage(message, 'user');
+                    displayMessage(`Sorry, we're not open at that time - we're here from ${BUSINESS_HOURS.start}am to ${BUSINESS_HOURS.end}pm. What time works better for you?`, 'bot');
+                    userInput.value = '';
+                    return;
+                }
+            }
+
             displayMessage(message, 'user');
             userInput.value = '';
-            userInput.disabled = true; // Disable input while waiting for response
-            sendButton.disabled = true; // Disable send button
-            loader.style.display = 'block'; // Show loader
+            
+            const disableInput = () => {
+                userInput.disabled = true;
+                sendButton.disabled = true;
+            };
+            
+            const enableInput = () => {
+                userInput.disabled = false;
+                sendButton.disabled = false;
+                userInput.focus();
+            };
+            
+            typingIndicator.style.display = 'block';
+            chatBox.scrollTop = chatBox.scrollHeight;
 
             try {
-                // Ensure your server is running on http://localhost:5001
+                disableInput();
                 const response = await fetch('http://localhost:5001/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ userMessage: message, conversationHistory: conversationHistory })
+                    body: JSON.stringify({ 
+                        userMessage: message, 
+                        conversationHistory: conversationHistory,
+                        businessHours: BUSINESS_HOURS
+                    })
                 });
 
                 if (!response.ok) {
@@ -166,18 +458,29 @@
                     throw new Error(`Server error: ${response.status} - ${errorData.error || 'Unknown error'}`);
                 }
 
+                await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
+
                 const data = await response.json();
-                displayMessage(data.reply, 'bot');
-                conversationHistory = data.conversationHistory; // Update history from server
+                
+                // Remove duplicate date confirmations and make responses more natural
+                let reply = data.reply
+                    .replace(/(\w+ \d+ \w+ \d{4})\. Great, I've got \1\./, '$1.')
+                    .replace(/Perfect! I've noted down/, "Alright, I've got")
+                    .replace(/Great! I've got all your details:/, "Perfect! Here's what I've got:")
+                    .replace(/What time would you like your appointment\? We're open/, "What time works for you? We're here")
+                    .replace(/Which service would you prefer\?/, "Which treatment would you like?")
+                    .replace(/Would you like me to go ahead and book this for you\?/, "Should I go ahead and book this for you?")
+                    .replace(/Is this correct\?/, "Does all that look right?");
+                
+                typingIndicator.style.display = 'none';
+                displayMessage(formatBookingDetails(reply), 'bot');
+                conversationHistory = data.conversationHistory;
             } catch (error) {
                 console.error('Error sending message:', error);
+                typingIndicator.style.display = 'none';
                 displayMessage('Sorry, something went wrong. Please try again later. (' + error.message + ')', 'bot');
             } finally {
-                userInput.disabled = false; // Re-enable input
-                sendButton.disabled = false; // Re-enable send button
-                loader.style.display = 'none'; // Hide loader
-                userInput.focus(); // Focus input for next message
-                chatBox.scrollTop = chatBox.scrollHeight; // Auto-scroll to bottom
+                enableInput();
             }
         }
 
@@ -186,15 +489,20 @@
             msgDiv.classList.add('message', sender === 'user' ? 'user-message' : 'bot-message');
             msgDiv.textContent = text;
             chatBox.appendChild(msgDiv);
-            chatBox.scrollTop = chatBox.scrollHeight; // Auto-scroll to bottom
+            chatBox.scrollTop = chatBox.scrollHeight;
         }
 
-        // Initial greeting when the page loads
         document.addEventListener('DOMContentLoaded', () => {
-            displayMessage("Hello! I'm Puja's Beauty Parlour AI Assistant. How can I help you today?", 'bot');
-            userInput.focus(); // Focus input field on load
+            // More natural, friendly initial messages
+            const initialMessages = [
+                "Hi there! 👋 I'm here to help you book your perfect beauty treatment.",
+                "Hey! 💝 Looking to book a beauty treatment today?",
+                "Hi! 🌟 Need help booking a treatment? I'm here to help!",
+                "Hey there! ✨ Let me help you find the perfect treatment for you."
+            ];
+            displayMessage(initialMessages[Math.floor(Math.random() * initialMessages.length)], 'bot');
+            userInput.focus();
         });
-
     </script>
 </body>
 </html>

@@ -36,23 +36,43 @@ A WhatsApp-based booking system for a beauty parlour that handles customer appoi
    npm install
    ```
 
-2. Set up environment variables in `.env`:
-   ```env
-   PORT=5001
-   TWILIO_ACCOUNT_SID=your_twilio_sid
-   TWILIO_AUTH_TOKEN=your_twilio_token
-   OWNER_PHONE=your_phone_number
-   BUSINESS_WHATSAPP=your_twilio_number
+2. Set up environment variables:
+   - Copy `.env.example` to `.env`
+   - Fill in your actual values for all the environment variables
+   ```bash
+   cp .env.example .env
    ```
 
-3. Set up Google Calendar:
+3. Required environment variables:
+   ```env
+   # Server Configuration
+   PORT=5001
+   
+   # Twilio Configuration
+   TWILIO_ACCOUNT_SID=your_twilio_account_sid
+   TWILIO_AUTH_TOKEN=your_twilio_auth_token
+   TWILIO_PHONE_NUMBER=your_twilio_phone_number
+   
+   # Business Information
+   BUSINESS_NAME=Your Business Name
+   OWNER_PHONE=your_phone_number
+   WHATSAPP_NUMBER=your_twilio_whatsapp_number
+   
+   # Google Calendar (optional)
+   GOOGLE_SERVICE_ACCOUNT_EMAIL=your_service_account_email
+   GOOGLE_CALENDAR_ID=your_calendar_id
+   GOOGLE_SERVICE_ACCOUNT_KEY=your_service_account_json_as_string
+   ```
+
+4. Set up Google Calendar (optional):
    - Create a service account in Google Cloud Console
-   - Download the credentials and save as `google-calendar-service-account.json`
+   - Download the credentials JSON file
+   - Copy the entire JSON content as a string to `GOOGLE_SERVICE_ACCOUNT_KEY`
    - Share your calendar with the service account email
 
-4. Start the server:
+5. Start the server:
    ```bash
-   node index.js
+   npm start
    ```
 
 ## Booking Flow
@@ -105,6 +125,8 @@ State files in:
 - Address validation
 - Business hours enforcement
 - Owner-only confirmation access
+- No hardcoded credentials in source code
+- Sensitive files excluded from version control
 
 ## Limitations
 

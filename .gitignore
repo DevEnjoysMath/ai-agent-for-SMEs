@@ -15,8 +15,9 @@ pids
 *.seed
 *.pid.lock
 
-# Credentials
+# Credentials and sensitive data
 google-calendar-service-account.json
+businessInfo.json
 
 # Directory for storing booking data
 bookings/

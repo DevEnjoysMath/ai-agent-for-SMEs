@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Puja's Beauty Parlour - AI Booking Assistant</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <style>
+        :root {
+            --primary: #ff69b4;
+            --secondary: #4a4a4a;
+            --background: #fff5f8;
+            --text: #333;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+            background-color: var(--background);
+            color: var(--text);
+        }
+
+        header {
+            background-color: var(--primary);
+            color: white;
+            padding: 2rem;
+            text-align: center;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin: 3rem 0;
+        }
+
+        .feature-card {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .feature-card h3 {
+            color: var(--primary);
+            margin-top: 0;
+        }
+
+        .architecture {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            margin: 3rem 0;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .benefits {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            margin: 3rem 0;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .mermaid {
+            text-align: center;
+            margin: 2rem 0;
+        }
+
+        footer {
+            background-color: var(--secondary);
+            color: white;
+            text-align: center;
+            padding: 1rem;
+            margin-top: 3rem;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🌟 Puja's Beauty Parlour</h1>
+        <h2>Intelligent AI Booking Assistant</h2>
+    </header>
+
+    <div class="container">
+        <section class="intro">
+            <h2>Transform Your Beauty Business with AI-Powered Booking</h2>
+            <p>
+                Meet your new 24/7 virtual assistant that handles bookings, answers customer queries, and manages your beauty service appointments effortlessly. Our AI agent combines natural language understanding with seamless integration of WhatsApp and Google Calendar to provide an exceptional booking experience for your customers.
+            </p>
+        </section>
+
+        <section class="feature-grid">
+            <div class="feature-card">
+                <h3>🤖 Intelligent Conversation</h3>
+                <ul>
+                    <li>Natural language understanding</li>
+                    <li>Handles multiple services booking</li>
+                    <li>Answers FAQs automatically</li>
+                    <li>Provides service information</li>
+                </ul>
+            </div>
+
+            <div class="feature-card">
+                <h3>📱 WhatsApp Integration</h3>
+                <ul>
+                    <li>Direct customer communication</li>
+                    <li>Instant booking confirmations</li>
+                    <li>Automated notifications</li>
+                    <li>Easy booking management</li>
+                </ul>
+            </div>
+
+            <div class="feature-card">
+                <h3>📅 Smart Scheduling</h3>
+                <ul>
+                    <li>Automatic Google Calendar updates</li>
+                    <li>Real-time availability checking</li>
+                    <li>Booking conflict prevention</li>
+                    <li>Easy rescheduling handling</li>
+                </ul>
+            </div>
+        </section>
+
+        <section class="architecture">
+            <h2>How It Works</h2>
+            <p>Our AI agent seamlessly handles the entire booking process from customer interaction to appointment scheduling:</p>
+            <div class="mermaid">
+flowchart TD
+    A["👤 Customer"] -->|"Messages"| B["🤖 AI Agent"]
+    B -->|"Natural Language Processing"| C{"Query Type"}
+    C -->|"Booking Request"| D["📅 Booking Flow"]
+    C -->|"General Query"| E["❓ FAQ Handler"]
+    D -->|"Collect Details"| F["📝 Booking Details<br/>• Services<br/>• Name<br/>• Date/Time<br/>• Address"]
+    F -->|"Process Booking"| G["💾 Save Booking"]
+    G -->|"Send Notification"| H["📱 Twilio WhatsApp API"]
+    G -->|"Create Event"| I["📆 Google Calendar API"]
+    H -->|"Notify"| J["👩‍💼 Business Owner"]
+    H -->|"Confirm"| A
+    J -->|"Approve/Reject"| H
+    E -->|"Respond"| A
+            </div>
+        </section>
+
+        <section class="benefits">
+            <h2>Key Benefits</h2>
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h3>💼 For Business</h3>
+                    <ul>
+                        <li>24/7 booking availability</li>
+                        <li>Reduced no-shows with automated reminders</li>
+                        <li>Streamlined appointment management</li>
+                        <li>Increased booking efficiency</li>
+                        <li>Detailed booking analytics</li>
+                    </ul>
+                </div>
+
+                <div class="feature-card">
+                    <h3>👥 For Customers</h3>
+                    <ul>
+                        <li>Easy and quick booking process</li>
+                        <li>Instant responses to queries</li>
+                        <li>Flexible booking options</li>
+                        <li>Automated confirmations and reminders</li>
+                        <li>24/7 availability for bookings</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <section class="feature-card">
+            <h2>Features & Capabilities</h2>
+            <ul>
+                <li><strong>Smart Service Selection:</strong> Handles multiple service bookings with intelligent service recognition</li>
+                <li><strong>Natural Conversation:</strong> Understands and responds to customer queries in a natural, friendly manner</li>
+                <li><strong>Automated Scheduling:</strong> Manages calendar events and prevents double bookings</li>
+                <li><strong>Instant Communication:</strong> Sends real-time confirmations and reminders via WhatsApp</li>
+                <li><strong>Flexible Booking Management:</strong> Handles modifications and cancellations efficiently</li>
+                <li><strong>Comprehensive FAQ Handling:</strong> Answers questions about services, prices, duration, and policies</li>
+                <li><strong>Location Services:</strong> Manages home service bookings with travel charge calculations</li>
+                <li><strong>Payment Information:</strong> Provides clear information about pricing and payment options</li>
+            </ul>
+        </section>
+    </div>
+
+    <footer>
+        <p>© 2024 Puja's Beauty Parlour - AI Booking Assistant</p>
+    </footer>
+
+    <script>
+        mermaid.initialize({ startOnLoad: true });
+    </script>
+</body>
+</html> 

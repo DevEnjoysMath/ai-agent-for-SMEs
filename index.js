@@ -13,6 +13,12 @@ const { MessagingResponse } = require('twilio').twiml;
 const app = express();
 const port = process.env.PORT || 5001;
 
+// Initialize Twilio client
+const twilioClient = twilio(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
+);
+
 // Service definitions with proper mapping
 const SERVICES = {
   'EYEBROW': { name: 'Eyebrow Threading', price: '€10', duration: 15 },
@@ -27,37 +33,46 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Load business info
-let businessInfo;
-try {
-  businessInfo = JSON.parse(fsSync.readFileSync('businessInfo.json', 'utf8'));
-  console.log("✅ Server configuration loaded");
-} catch (error) {
-  console.error("❌ Error loading business info:", error);
-  process.exit(1);
-}
-
-// Initialize Twilio
-if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
-  console.warn("⚠️ Missing Twilio credentials in .env file - WhatsApp notifications will be skipped");
-}
+// Load business info from environment variables
+let businessInfo = {
+  name: process.env.BUSINESS_NAME || "Puja's Beauty Parlour",
+  service_area: process.env.SERVICE_AREA || "Dublin – Home Service Only",
+  phone: process.env.BUSINESS_PHONE || "+353 85 808 8578",
+  hours: process.env.BUSINESS_HOURS || "Mon–Sun: 9am–10pm",
+  owner: {
+    name: process.env.OWNER_NAME || "Puja",
+    phone: process.env.OWNER_PHONE || "+353858088571"
+  },
+  whatsapp: process.env.WHATSAPP_NUMBER || "+14155238886",
+  services: [
+    { name: "Eyebrow Threading", price: "€10" },
+    { name: "Full Face Threading", price: "€25" },
+    { name: "Facial (Basic)", price: "€40" },
+    { name: "Facial (Luxury)", price: "€60" },
+    { name: "Full Body Waxing", price: "€70" },
+    { name: "Henna Design", price: "€20–€50" }
+  ]
+};
 
 console.log("✅ Server configuration loaded");
-const twilioClient = process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN ? 
-  twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN) : null;
 
 // Initialize Google Calendar
 let calendar;
-const SERVICE_ACCOUNT_EMAIL = 'ai-agent@gen-lang-client-0979601949.iam.gserviceaccount.com';
-const OWNER_CALENDAR_ID = 'devdeepak157@gmail.com';
+const SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+const OWNER_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID;
 
 try {
-  const auth = new google.auth.GoogleAuth({
-    keyFile: 'google-calendar-service-account.json',
-    scopes: ['https://www.googleapis.com/auth/calendar']
-  });
-  calendar = google.calendar({ version: 'v3', auth });
-  console.log('✅ Google Calendar initialized');
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+    const auth = new google.auth.GoogleAuth({
+      credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY),
+      scopes: ['https://www.googleapis.com/auth/calendar']
+    });
+    calendar = google.calendar({ version: 'v3', auth });
+    console.log('✅ Google Calendar initialized');
+  } else {
+    console.warn('⚠️ Google Calendar credentials not found in environment variables');
+    calendar = null;
+  }
 } catch (error) {
   console.warn('⚠️ Google Calendar initialization failed:', error.message);
   calendar = null;
@@ -75,13 +90,14 @@ async function ensureDirectoriesExist() {
 ensureDirectoriesExist().catch(console.error);
 
 // File paths
-const STATE_FILE = path.join(__dirname, 'booking_state.json');
+const STATES_DIR = path.join(__dirname, 'states');
 const BOOKINGS_DIR = path.join(__dirname, 'bookings');
 
 // State management functions
-async function getBookingState() {
+async function getBookingState(userPhone) {
   try {
-    const data = await fs.readFile(STATE_FILE, 'utf8');
+    const stateFile = path.join(STATES_DIR, `${userPhone}.json`);
+    const data = await fs.readFile(stateFile, 'utf8');
     return JSON.parse(data);
   } catch (error) {
     if (error.code === 'ENOENT') {
@@ -92,12 +108,13 @@ async function getBookingState() {
   }
 }
 
-async function saveBookingState(state) {
+async function saveBookingState(userPhone, state) {
   try {
+    const stateFile = path.join(STATES_DIR, `${userPhone}.json`);
     if (state) {
-      await fs.writeFile(STATE_FILE, JSON.stringify(state, null, 2));
+      await fs.writeFile(stateFile, JSON.stringify(state, null, 2));
     } else {
-      await fs.unlink(STATE_FILE).catch(() => {}); // Ignore if file doesn't exist
+      await fs.unlink(stateFile).catch(() => {}); // Ignore if file doesn't exist
     }
   } catch (error) {
     console.error('Error saving booking state:', error);
@@ -106,7 +123,7 @@ async function saveBookingState(state) {
 
 async function savePendingBooking(booking) {
   try {
-    const filename = `${Date.now()}_${booking.name.replace(/[^a-z0-9]/gi, '_')}.json`;
+    const filename = `${Date.now()}_${booking.phone}_${booking.name.replace(/[^a-z0-9]/gi, '_')}.json`;
     const filepath = path.join(BOOKINGS_DIR, filename);
     await fs.writeFile(filepath, JSON.stringify(booking, null, 2));
     return filepath;
@@ -139,12 +156,25 @@ function validateBooking(booking) {
   if (!booking.address) {
     errors.push("Address is required");
   }
+
+  // Only validate phone if provided
+  if (booking.phone && !validatePhoneNumber(booking.phone)) {
+    errors.push("Please provide a valid Irish phone number");
+  }
   
   return errors;
 }
 
+// Validate phone number format
+function validatePhoneNumber(phone) {
+  // Irish phone number format: +353 XX XXX XXXX or 08X XXX XXXX
+  const irishPhoneRegex = /^(?:\+353|0)8[35679]\d{7}$/;
+  const cleanPhone = phone.replace(/[\s-]/g, '');
+  return irishPhoneRegex.test(cleanPhone);
+}
+
 // Process booking confirmation
-async function processBooking(booking) {
+async function processBooking(booking, message = '') {
   try {
     // Validate booking
     const errors = validateBooking(booking);
@@ -156,30 +186,33 @@ async function processBooking(booking) {
     }
     
     // Calculate total cost and travel charge
+    const servicesTotal = calculateServicesTotal(booking.services);
     const travelCharge = calculateTravelCharge(booking.address);
-    const servicesTotal = booking.services.reduce((total, service) => {
-      const serviceInfo = Object.values(SERVICES).find(s => s.name === service);
-      if (serviceInfo) {
-        const price = parseInt(serviceInfo.price.replace('€', ''));
-        return total + (isNaN(price) ? 0 : price);
-      }
-      return total;
-    }, 0);
+    const totalCost = servicesTotal + travelCharge;
     
     // Format date nicely
-    const bookingDate = new Date(booking.date);
-    const formattedDate = bookingDate.toLocaleDateString('en-IE', {
+    const formattedDate = new Date(booking.date);
+    const dateString = formattedDate.toLocaleDateString('en-IE', { 
       weekday: 'long',
       day: 'numeric',
       month: 'long',
       year: 'numeric'
     });
+
+    // Format time nicely
+    const timeMatch = booking.time.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
+    const formattedTime = timeMatch ? 
+      `${timeMatch[1].padStart(2, '0')}:${(timeMatch[2] || '00').padStart(2, '0')}${timeMatch[3].toLowerCase()}` :
+      booking.time;
     
     // Save booking
     const bookingToSave = {
       ...booking,
-      date: formattedDate,
-      totalCost: servicesTotal + travelCharge
+      servicesTotal,
+      travelCharge,
+      totalCost,
+      date: dateString,
+      time: formattedTime
     };
     
     const bookingFile = await savePendingBooking(bookingToSave);
@@ -193,20 +226,45 @@ async function processBooking(booking) {
     
     // Create calendar event
     const calendarLink = await createCalendarEvent(bookingToSave);
-    
+    if (calendarLink) {
+      console.log('✅ Calendar event created:', calendarLink);
+    }
+
+        // If confirmation is successful, send a more final message
+     if (isConfirmation(message)) {
+      return {
+        success: true,
+        message: `Great! I've confirmed your booking and sent the details to the beautician. You'll receive a WhatsApp confirmation shortly.\n\n` +
+          `📋 ━━━ Booking Confirmed ━━━\n` +
+          `👤 Name: ${booking.name}\n` +
+          `💅 Services: ${booking.services.join(', ')}\n` +
+          `📅 Date: ${dateString}\n` +
+          `⏰ Time: ${formattedTime}\n` +
+          `📍 Address: ${booking.address}\n\n` +
+          `💰 Services Total: €${servicesTotal}\n` +
+          `🚗 Travel Charge: €${travelCharge}\n` +
+          `💳 Total Cost: €${totalCost}\n\n` +
+          `See you soon! If you need to make any changes, just let me know.`
+      };
+    }
+
+    // Otherwise, ask for confirmation
     return {
       success: true,
-      message: `Thank you for your booking! I've sent the details to the salon owner for confirmation.\n\n` +
-        `Your booking details:\n` +
-        `• Name: ${booking.name}\n` +
-        `• Services: ${booking.services.join(', ')}\n` +
-        `• Date: ${formattedDate}\n` +
-        `• Time: ${booking.time}\n` +
-        `• Address: ${booking.address}\n\n` +
-        `Services Total: €${servicesTotal}\n` +
-        `Travel Charge: €${travelCharge}\n` +
-        `Total Cost: €${servicesTotal + travelCharge}\n\n` +
-        `You'll receive a WhatsApp message once the owner confirms your booking.`
+      message: `Perfect! Here's your booking details:\n\n` +
+        `📋 ━━━ Booking Details ━━━\n` +
+        `👤 Name: ${booking.name}\n` +
+        `💅 Services: ${booking.services.join(', ')}\n` +
+        `📅 Date: ${dateString}\n` +
+        `⏰ Time: ${formattedTime}\n` +
+        `📍 Address: ${booking.address}\n\n` +
+        `💰 Services Total: €${servicesTotal}\n` +
+        `🚗 Travel Charge: €${travelCharge}\n` +
+        `💳 Total Cost: €${totalCost}\n\n` +
+        `Does all that look good to you?`,
+      servicesTotal,
+      travelCharge,
+      totalCost
     };
   } catch (error) {
     console.error('Error processing booking:', error);
@@ -224,7 +282,13 @@ async function sendWhatsAppNotifications(data, retries = 3) {
     return false;
   }
 
-  const ownerMessage = `📅 *New Booking*
+  // Skip if no phone number provided
+  if (!data.phone) {
+    console.log('⚠️ Skipping WhatsApp notification - no phone number provided');
+    return false;
+  }
+
+  const ownerMessage = `🔔 *New Booking*\n
 ${data.services.join(', ')} for ${data.name}
 📆 ${data.date} at ${data.time}
 📍 ${data.address}
@@ -354,16 +418,8 @@ Always aim to sound like a real, helpful person. Keep replies warm and informati
 }
 
 // Process user message
-async function processMessage(message) {
+async function processMessage(message, booking) {
   try {
-    let booking = await getBookingState() || {
-      name: '',
-      services: [],
-      date: '',
-      time: '',
-      address: ''
-    };
-
     const normalizedMsg = message.toLowerCase().trim();
 
     // Always check for services first in any message
@@ -389,55 +445,74 @@ async function processMessage(message) {
     // If we found services, add them and acknowledge
     if (servicesFound.length > 0) {
       booking.services.push(...servicesFound);
-      await saveBookingState(booking);
       
-      if (servicesFound.length === 1) {
-        return `I've added ${servicesFound[0]} to your booking. What's your name?`;
-      } else {
-        return `I've added ${servicesFound.join(' and ')} to your booking. What's your name?`;
-      }
+      return {
+        message: servicesFound.length === 1 
+          ? `I've added ${servicesFound[0]} to your booking. What's your name?`
+          : `I've added ${servicesFound.join(' and ')} to your booking. What's your name?`,
+        booking: booking
+      };
     }
 
     // If it's just a greeting and no services mentioned, respond appropriately
     if (isGreeting(message) && !normalizedMsg.includes('book') && !normalizedMsg.includes('want')) {
       if (booking.services.length === 0) {
-        return `Hey! I can help you book any of these services:\n${Object.values(SERVICES).map(s => `• ${s.name} (${s.price})`).join('\n')}\nWhich service would you like?`;
+        return {
+          message: `Here are our services:\n\n` +
+            `💆‍♀️ Facial Treatments:\n` +
+            `• Basic Facial (€40) - 45 minutes\n` +
+            `• Luxury Facial (€60) - 60 minutes\n\n` +
+            `🧵 Threading Services:\n` +
+            `• Eyebrow Threading (€10) - 15 minutes\n` +
+            `• Full Face Threading (€25) - 30 minutes\n\n` +
+            `✨ Other Services:\n` +
+            `• Full Body Waxing (€70) - 90 minutes\n` +
+            `• Henna Design (€20–€50) - 45-60 minutes\n\n` +
+            `Which service would you like to book?`,
+          booking: booking
+        };
       } else {
-        return getRandomGreeting();
+        return {
+          message: getRandomGreeting(),
+          booking: booking
+        };
       }
     }
 
     // Update booking with any new information
     const updatedBooking = extractAndUpdateDetails(message, booking);
     
-    // If nothing changed, check for confirmation or commands
-    if (JSON.stringify(updatedBooking) === JSON.stringify(booking)) {
-      if (isConfirmation(message)) {
-        const result = await processBooking(booking);
-        return result.message;
-      }
-      
-      if (isCommand(message)) {
-        return handleCommand(message, booking);
-      }
+    // If nothing changed and it's a command, handle it
+    if (JSON.stringify(updatedBooking) === JSON.stringify(booking) && isCommand(message)) {
+      return {
+        message: handleCommand(message, booking),
+        booking: booking
+      };
     }
-
-    // Save updated booking state
-    await saveBookingState(updatedBooking);
     
     // Get missing fields
     const missingFields = getMissingFields(updatedBooking);
     
-    // If booking is complete, show summary
+    // If booking is complete, process it
     if (missingFields.length === 0) {
-      return getBookingSummary(updatedBooking);
+      const result = await processBooking(updatedBooking, message);
+      return {
+        message: result.message,
+        booking: updatedBooking
+      };
     }
     
     // Get next prompt
-    return getNextPrompt(updatedBooking, missingFields);
+    return {
+      message: getNextPrompt(updatedBooking, missingFields),
+      booking: updatedBooking
+    };
   } catch (error) {
     console.error('Error processing message:', error);
-    return "I apologize, but I encountered an error. Could you please try again?";
+    return {
+      message: "I apologize, but I encountered an error. Could you please try again?",
+      booking: booking
+    };
   }
 }
 
@@ -464,27 +539,44 @@ function getNextPrompt(booking, missingFields) {
     return null;
   }
 
+  // Skip asking for name if we already have it
+  if (booking.name && missingFields.includes('name')) {
+    missingFields = missingFields.filter(field => field !== 'name');
+    if (missingFields.length === 0) {
+      return null;
+    }
+  }
+
   const prompts = {
     name: [
-      "What's your name?",
-      "Who should I put the booking under?"
+      "Could I get your name?",
+      "What name should I put this booking under?",
+      "Who am I booking this for?"
     ],
     services: [
-      `Which service would you like to book?\n${Object.values(SERVICES).map(s => `• ${s.name} (${s.price})`).join('\n')}\n\nYou can book multiple services together!`
+      `What treatment would you like?\n${Object.values(SERVICES).map(s => `• ${s.name} (${s.price})`).join('\n')}\n\nYou can book multiple treatments together!`
     ],
     date: [
-      "When would you like to schedule your appointment? You can say 'tomorrow', 'next Monday', or give me a specific date."
+      "What date would you like me to come? You can say 'tomorrow', 'next Monday', or any specific date."
     ],
     time: [
-      "What time would you like your appointment? We're open 9 AM to 8 PM."
+      "What time works best for you? I'm available from 9am to 8pm.",
+      "What time would you prefer? I'm available 9am to 8pm."
     ],
     address: [
-      "What's your address?"
+      "What's your address?",
+      "Could you share your address with me?",
+      "What's your home address?"
+    ],
+    phone: [
+      "What's your phone number? I'll use this to send you booking confirmations via WhatsApp.",
+      "Could you share your phone number? This is for WhatsApp notifications.",
+      "Please provide your phone number for booking confirmations."
     ]
   };
 
   const field = missingFields[0];
-  const promptList = prompts[field] || [`Please provide your ${field}.`];
+  const promptList = prompts[field] || [`Could you provide your ${field}?`];
   return promptList[Math.floor(Math.random() * promptList.length)];
 }
 
@@ -503,6 +595,7 @@ function extractService(message) {
     'basic facial': 'Facial (Basic)',
     'facial luxury': 'Facial (Luxury)',
     'luxury facial': 'Facial (Luxury)',
+    'facial': null, // Special case to handle ambiguous facial request
     'waxing': 'Full Body Waxing',
     'full body': 'Full Body Waxing',
     'full body waxing': 'Full Body Waxing',
@@ -523,6 +616,10 @@ function extractService(message) {
   // Check direct mappings first
   for (const [key, value] of Object.entries(serviceMap)) {
     if (messageToCheck.includes(key)) {
+      if (value === null) {
+        // Handle ambiguous facial request
+        return 'AMBIGUOUS_FACIAL';
+      }
       return value;
     }
   }
@@ -542,86 +639,114 @@ function extractAndUpdateDetails(message, currentBooking) {
   const booking = { ...currentBooking };
   const normalizedMessage = message.toLowerCase().trim();
   
-  // Initialize services array if not exists
-  if (!booking.services) {
-    booking.services = [];
-  }
-  
-  // Extract service(s)
-  if (normalizedMessage.includes('and') || normalizedMessage.includes(',')) {
-    // Split message into potential service parts
-    const parts = normalizedMessage.split(/(?:,|\sand\s)/);
-    for (const part of parts) {
-      const service = extractService(part);
+  // Extract service(s) if we don't have any yet
+  if (booking.services.length === 0) {
+    if (normalizedMessage.includes('and') || normalizedMessage.includes(',')) {
+      const parts = normalizedMessage.split(/(?:,|\sand\s)/);
+      for (const part of parts) {
+        const service = extractService(part);
+        if (service && !booking.services.includes(service)) {
+          booking.services.push(service);
+        }
+      }
+    } else {
+      const service = extractService(message);
       if (service && !booking.services.includes(service)) {
         booking.services.push(service);
       }
     }
-    if (booking.services.length > currentBooking.services.length) {
-      return booking;
-    }
-  } else {
-    const service = extractService(message);
-    if (service && !booking.services.includes(service)) {
-      booking.services.push(service);
-      return booking;
+  }
+  
+  // Extract name if we don't have it
+  if (!booking.name && booking.services.length > 0) {
+    const possibleName = extractName(message);
+    if (possibleName) {
+      booking.name = possibleName;
     }
   }
   
-  // Extract name if not set
-  if (!booking.name && !isGreeting(message) && !normalizedMessage.includes('book')) {
-    const serviceNames = Object.values(SERVICES).map(s => s.name.toLowerCase());
-    if (!serviceNames.some(s => normalizedMessage.includes(s.toLowerCase()))) {
-      const words = message.trim().split(/\s+/);
-      if (words.length >= 1 && words.length <= 3 && !words.some(w => /[\d@#$%^&*(),.?":{}|<>]/.test(w))) {
-        booking.name = message.trim()
-          .split(' ')
-          .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-          .join(' ');
-        return booking;
-      }
-    }
-  }
-  
-  // Extract date and time
-  if (!booking.date || !booking.time) {
+  // Extract date if we have name but no date
+  if (!booking.date && booking.name) {
     const dateTimeInfo = extractDateTime(message);
-    if (dateTimeInfo.date) booking.date = dateTimeInfo.date;
-    if (dateTimeInfo.time) booking.time = dateTimeInfo.time;
-    if (dateTimeInfo.date || dateTimeInfo.time) return booking;
+    if (dateTimeInfo.date) {
+      booking.date = dateTimeInfo.date;
+    }
   }
   
-  // Extract address if not set
-  if (!booking.address && !message.match(/^\+?\d+$/)) {
-    const addressIndicators = [
-      /\d+\s+[A-Za-z\s,]+(?:road|street|avenue|lane|place|way|drive|close|court|park|square|hill|gardens|grove|terrace)/i,
-      /[A-Za-z\s]+(?:road|street|avenue|lane|place|way|drive|close|court|park|square|hill|gardens|grove|terrace)\s*,/i,
-      /dublin\s*\d{1,2}/i,
-      /d\d{1,2}\s+[A-Za-z0-9\s,]+/i,
-      /\d+\s+[A-Za-z\s,]+/  // More general pattern for house/apt numbers
-    ];
-
-    for (const pattern of addressIndicators) {
-      const match = message.match(pattern);
-      if (match) {
-        let address = message.slice(match.index);
-        address = address.replace(/[.,;]$/, '').trim();
-        address = address.split(' ')
-          .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-          .join(' ');
-        booking.address = address;
-        return booking;
+  // Extract time if we have date but no time
+  if (!booking.time && booking.date) {
+    const dateTimeInfo = extractDateTime(message);
+    if (dateTimeInfo.time) {
+      booking.time = dateTimeInfo.time;
+    }
+  }
+  
+  // Extract address if we have time but no address
+  if (!booking.address && booking.time) {
+    // Don't treat time inputs as addresses
+    if (!message.match(/^\d{1,2}(?::(\d{2}))?\s*(am|pm)?$/i)) {
+      const possibleAddress = extractAddress(message);
+      if (possibleAddress) {
+        booking.address = possibleAddress;
       }
     }
-    
-    // If no specific pattern matches but it's not a service or command
-    if (!extractService(message) && !isCommand(message) && message.length > 5) {
-      booking.address = message.trim();
-      return booking;
+  }
+
+  // Extract phone if we have address but no phone
+  if (!booking.phone && booking.address) {
+    const possiblePhone = extractPhoneNumber(message);
+    if (possiblePhone) {
+      booking.phone = possiblePhone;
     }
   }
   
   return booking;
+}
+
+// Helper function to extract name
+function extractName(message) {
+  // If message is too long or contains service names, it's probably not a name
+  if (message.length > 30 || Object.values(SERVICES).some(s => 
+    message.toLowerCase().includes(s.name.toLowerCase())
+  )) {
+    return null;
+  }
+
+  // If message contains common non-name indicators, it's not a name
+  const nonNameIndicators = ['book', 'want', 'need', 'looking', 'address', 'time', 'date'];
+  if (nonNameIndicators.some(word => message.toLowerCase().includes(word))) {
+    return null;
+  }
+
+  // Clean and format the potential name
+  const cleanedName = message
+    .trim()
+    .replace(/[^a-zA-Z\s]/g, '') // Remove non-letter characters
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ')
+    .trim();
+
+  return cleanedName || null;
+}
+
+// Helper function to extract address
+function extractAddress(message) {
+  // If message is too short or contains booking keywords, it's probably not an address
+  if (message.length < 5 || 
+      message.match(/^(yes|no|ok|sure|cancel|book|what|how|when)/i) ||
+      message.match(/^\d{1,2}(?::\d{2})?\s*(?:am|pm)?$/i)) { // Don't treat time as address
+    return null;
+  }
+
+  // Clean and format the potential address
+  const cleanedAddress = message
+    .trim()
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+
+  return cleanedAddress || null;
 }
 
 // Calculate travel charge based on address
@@ -633,7 +758,7 @@ function calculateTravelCharge(address) {
 // Extract date and time from message
 function extractDateTime(message) {
   const result = { date: null, time: null };
-  const msg = message.toLowerCase();
+  const msg = message.toLowerCase().trim();
   
   // Handle date
   if (msg.includes('tomorrow')) {
@@ -641,7 +766,7 @@ function extractDateTime(message) {
     tomorrow.setDate(tomorrow.getDate() + 1);
     result.date = tomorrow.toLocaleDateString('en-IE', { 
       weekday: 'long', 
-      year: 'numeric',  // Add year to the date
+      year: 'numeric',
       day: 'numeric', 
       month: 'long'
     });
@@ -657,102 +782,109 @@ function extractDateTime(message) {
       date.setDate(date.getDate() + daysToAdd);
       result.date = date.toLocaleDateString('en-IE', { 
         weekday: 'long',
-        year: 'numeric',  // Add year to the date
+        year: 'numeric',
         day: 'numeric', 
         month: 'long'
       });
     }
-  } else {
-    // Try to parse date formats
-    const datePatterns = [
-      // DD/MM/YYYY or DD-MM-YYYY
-      /(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/,
-      // Month DD
-      /(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:\s*,?\s*(\d{4}))?/i,
-      // DD Month
-      /(\d{1,2})\s+(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s*,?\s*(\d{4}))?/i
-    ];
+  }
+  
+  // Try to parse date formats
+  const datePatterns = [
+    // DD/MM/YYYY or DD-MM-YYYY
+    /(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/,
+    // Month DD or DD Month (including ordinal suffixes)
+    /(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s*,?\s*(\d{4}))?/i,
+    // DD Month (including ordinal suffixes)
+    /(\d{1,2})(?:st|nd|rd|th)?\s+(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s*,?\s*(\d{4}))?/i,
+    // Just the day with ordinal and month
+    /(\d{1,2})(?:st|nd|rd|th)?\s*(january|february|march|april|may|june|july|august|september|october|november|december)/i
+  ];
 
-    for (const pattern of datePatterns) {
-      const match = msg.match(pattern);
-      if (match) {
-        const date = new Date();
-        if (match[1] && match[2]) {
-          if (isNaN(match[1])) {
-            // Month DD format
+  for (const pattern of datePatterns) {
+    const match = msg.match(pattern);
+    if (match) {
+      const date = new Date();
+      if (match[1] && match[2]) {
+        if (isNaN(match[1])) {
+          // Month DD format
+          const months = ['january', 'february', 'march', 'april', 'may', 'june', 
+                        'july', 'august', 'september', 'october', 'november', 'december'];
+          const monthIndex = months.indexOf(match[1].toLowerCase());
+          if (monthIndex !== -1) {
+            date.setMonth(monthIndex);
+            // Remove any ordinal suffix
+            const day = parseInt(match[2].replace(/(st|nd|rd|th)/, ''));
+            date.setDate(day);
+            if (match[3]) date.setFullYear(parseInt(match[3]));
+          }
+        } else {
+          // DD/MM or DD Month format
+          const day = parseInt(match[1].replace(/(st|nd|rd|th)/, ''));
+          if (isNaN(match[2])) {
+            // DD Month format
             const months = ['january', 'february', 'march', 'april', 'may', 'june', 
                           'july', 'august', 'september', 'october', 'november', 'december'];
-            const monthIndex = months.indexOf(match[1].toLowerCase());
+            const monthIndex = months.indexOf(match[2].toLowerCase());
             if (monthIndex !== -1) {
               date.setMonth(monthIndex);
-              date.setDate(parseInt(match[2]));
+              date.setDate(day);
               if (match[3]) date.setFullYear(parseInt(match[3]));
             }
           } else {
-            // DD/MM or DD Month format
-            const day = parseInt(match[1]);
-            if (isNaN(match[2])) {
-              // DD Month format
-              const months = ['january', 'february', 'march', 'april', 'may', 'june', 
-                            'july', 'august', 'september', 'october', 'november', 'december'];
-              const monthIndex = months.indexOf(match[2].toLowerCase());
-              if (monthIndex !== -1) {
-                date.setMonth(monthIndex);
-                date.setDate(day);
-                if (match[3]) date.setFullYear(parseInt(match[3]));
-              }
-            } else {
-              // DD/MM format
-              date.setDate(day);
-              date.setMonth(parseInt(match[2]) - 1);
-              if (match[3]) {
-                let year = parseInt(match[3]);
-                if (year < 100) year += 2000;
-                date.setFullYear(year);
-              }
+            // DD/MM format
+            date.setDate(day);
+            date.setMonth(parseInt(match[2]) - 1);
+            if (match[3]) {
+              let year = parseInt(match[3]);
+              if (year < 100) year += 2000;
+              date.setFullYear(year);
             }
           }
-          result.date = date.toLocaleDateString('en-IE', { 
-            weekday: 'long',
-            year: 'numeric',  // Add year to the date
-            day: 'numeric', 
-            month: 'long'
-          });
         }
-        break;
+        result.date = date.toLocaleDateString('en-IE', { 
+          weekday: 'long',
+          year: 'numeric',
+          day: 'numeric', 
+          month: 'long'
+        });
       }
     }
   }
 
-  // Handle time
+  // Handle time with improved parsing
   const timePatterns = [
-    // HH:MM am/pm or HH am/pm
-    /(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i,
-    // 24-hour format
-    /(\d{1,2})(?::(\d{2}))?(?!\s*[ap]m)/i
+    // Match "10 am", "10am", "10:00 am", "10:00am"
+    /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i,
+    // Match "10", "10:00" (24-hour format)
+    /\b(\d{1,2})(?::(\d{2}))?\b(?!\s*[ap]m)/i
   ];
 
   for (const pattern of timePatterns) {
     const match = msg.match(pattern);
     if (match) {
       let hours = parseInt(match[1]);
-      const minutes = match[2] ? match[2] : '00';
+      const minutes = match[2] ? parseInt(match[2]) : 0;
       const meridian = match[3] ? match[3].toLowerCase() : null;
 
-      // Convert to 12-hour format
-      if (!meridian) {
+      // Handle 12-hour format (am/pm)
+      if (meridian) {
+        if (meridian === 'pm' && hours < 12) hours += 12;
+        if (meridian === 'am' && hours === 12) hours = 0;
+      } else {
         // 24-hour format
         if (hours >= 0 && hours <= 23) {
           const meridian = hours >= 12 ? 'pm' : 'am';
-          hours = hours % 12 || 12;
-          result.time = `${hours}:${minutes}${meridian}`;
-        }
-      } else {
-        // 12-hour format
-        if (hours >= 1 && hours <= 12) {
-          result.time = `${hours}:${minutes}${meridian}`;
+          if (hours > 12) hours -= 12;
+          if (hours === 0) hours = 12;
         }
       }
+
+      // Format the time string
+      const formattedHours = hours;
+      const formattedMinutes = minutes.toString().padStart(2, '0');
+      const period = (meridian || (hours >= 12 ? 'pm' : 'am'));
+      result.time = `${formattedHours}:${formattedMinutes}${period}`;
       break;
     }
   }
@@ -768,7 +900,7 @@ function isConfirmation(message) {
     'sounds good', 'looks good', 'perfect', 'great', 'wonderful',
     'that works', 'works for me', 'good with me', 'fine by me',
     'please proceed', 'go ahead', 'book it', 'let\'s do it',
-    'that\'s fine', 'all set', 'absolutely'
+    'that\'s fine', 'all set', 'absolutely', 'yes please'
   ];
   const msg = message.trim().toLowerCase();
   return confirmations.some(conf => 
@@ -798,70 +930,133 @@ function isBookingComplete(data) {
 function handleGeneralQuestion(message) {
   const msg = message.toLowerCase();
   
+  // Physical store/location questions
+  if ((msg.includes('store') || msg.includes('shop') || msg.includes('salon')) && 
+      (msg.includes('physical') || msg.includes('location') || msg.includes('where') || msg.includes('address'))) {
+    return "I provide all services at your home - there's no physical store! I travel throughout Dublin to provide beauty services at your convenience. Travel charges range from €5-€10 depending on your location. Would you like to book a treatment?";
+  }
+
+  // Home service questions
+  if ((msg.includes('home') && (msg.includes('service') || msg.includes('visit'))) || 
+      msg.includes('do you come') || 
+      msg.includes('provide service') ||
+      (msg.includes('where') && msg.includes('service'))) {
+    return "Yes! I provide all services at your home. I travel throughout Dublin and come to your location for the treatment. Travel charges range from €5-€10 depending on your location. Would you like to book a treatment?";
+  }
+
   // Service-related questions
   if (msg.includes('what') && (msg.includes('service') || msg.includes('offer') || msg.includes('treatment'))) {
-    const serviceList = Object.values(SERVICES)
-      .map(s => `• ${s.name} (${s.price})`)
-      .join('\n');
-    return `We offer the following beauty services:\n${serviceList}\n\nWhich service would you like to book?`;
+    return `I offer these beauty services:\n\n` +
+      `💆‍♀️ Facial Treatments:\n` +
+      `• Basic Facial (€40) - 45 minutes\n` +
+      `• Luxury Facial (€60) - 60 minutes\n\n` +
+      `🧵 Threading Services:\n` +
+      `• Eyebrow Threading (€10) - 15 minutes\n` +
+      `• Full Face Threading (€25) - 30 minutes\n\n` +
+      `✨ Other Services:\n` +
+      `• Full Body Waxing (€70) - 90 minutes\n` +
+      `• Henna Design (€20–€50) - 45-60 minutes\n\n` +
+      `Would you like to book any of these treatments?`;
+  }
+
+  // Opening hours/timing questions
+  if (msg.includes('opening') || msg.includes('closing') || 
+      msg.includes('hours') || msg.includes('timing') || 
+      (msg.includes('what') && msg.includes('time')) ||
+      msg.includes('when') && msg.includes('open')) {
+    return "I'm available from 9am to 8pm, 7 days a week. All services are provided at your home for your convenience. When would you like to schedule your treatment?";
   }
 
   // Price-related questions
-  if (msg.includes('how much') || msg.includes('price') || msg.includes('cost')) {
+  if (msg.includes('how much') || msg.includes('price') || msg.includes('cost') || msg.includes('charge')) {
     const service = extractService(message);
     if (service) {
       const serviceInfo = Object.values(SERVICES).find(s => s.name === service);
       if (serviceInfo) {
-        return `The ${service} costs ${serviceInfo.price}. Would you like to book this service?`;
+        return `The ${service} costs ${serviceInfo.price} and takes about ${serviceInfo.duration} minutes. A travel charge of €5-€10 will be added depending on your location. Would you like to book this service?`;
       }
     }
-    const serviceList = Object.values(SERVICES)
-      .map(s => `• ${s.name} (${s.price})`)
-      .join('\n');
-    return `Here are our services and prices:\n${serviceList}\n\nWhich service interests you?`;
+    return `Here are my services and prices:\n\n` +
+      `💆‍♀️ Facial Treatments:\n` +
+      `• Basic Facial (€40) - 45 minutes\n` +
+      `• Luxury Facial (€60) - 60 minutes\n\n` +
+      `🧵 Threading Services:\n` +
+      `• Eyebrow Threading (€10) - 15 minutes\n` +
+      `• Full Face Threading (€25) - 30 minutes\n\n` +
+      `✨ Other Services:\n` +
+      `• Full Body Waxing (€70) - 90 minutes\n` +
+      `• Henna Design (€20–€50) - 45-60 minutes\n\n` +
+      `A travel charge of €5-€10 will be added depending on your location.\n\n` +
+      `Which service would you like to know more about?`;
   }
 
   // Duration questions
   if (msg.includes('how long') || msg.includes('duration') || msg.includes('take')) {
     const service = extractService(message);
     if (service) {
-      const durations = {
-        'Eyebrow Threading': '15 minutes',
-        'Full Face Threading': '30 minutes',
-        'Facial (Basic)': '45 minutes',
-        'Facial (Luxury)': '60 minutes',
-        'Full Body Waxing': '90 minutes',
-        'Henna Design': '45 minutes'
-      };
-      const duration = durations[service] || '30-60 minutes';
-      return `The ${service} typically takes ${duration}. Would you like to book an appointment?`;
+      const serviceInfo = Object.values(SERVICES).find(s => s.name === service);
+      if (serviceInfo) {
+        return `The ${service} takes about ${serviceInfo.duration} minutes. I'll come to your home for the treatment. Would you like to book this service?`;
+      }
     }
-    return "The duration varies depending on the service. Could you let me know which service you're interested in?";
+    return `Here are my service durations:\n\n` +
+      `💆‍♀️ Facial Treatments:\n` +
+      `• Basic Facial - 45 minutes\n` +
+      `• Luxury Facial - 60 minutes\n\n` +
+      `🧵 Threading Services:\n` +
+      `• Eyebrow Threading - 15 minutes\n` +
+      `• Full Face Threading - 30 minutes\n\n` +
+      `✨ Other Services:\n` +
+      `• Full Body Waxing - 90 minutes\n` +
+      `• Henna Design - 45-60 minutes\n\n` +
+      `All services are provided at your home. Which service would you like to know more about?`;
   }
 
-  // Location/area questions
-  if (msg.includes('where') || msg.includes('location') || msg.includes('area') || msg.includes('come to')) {
-    return "We provide home beauty services throughout Dublin. We'll come to your location for the treatment. Would you like to book an appointment?";
+  // Location/travel questions
+  if (msg.includes('where') || msg.includes('location') || msg.includes('area') || msg.includes('travel')) {
+    return "I provide all beauty services at your home throughout Dublin. I'll come to your location for the treatment. Travel charges range from €5-€10 depending on your location. Would you like to book a treatment?";
   }
 
   // Availability questions
-  if (msg.includes('when') || msg.includes('available') || msg.includes('next')) {
-    return "We're open from 9 AM to 8 PM, Monday to Saturday. When would you like to schedule your appointment?";
+  if (msg.includes('when') || (msg.includes('what') && msg.includes('time')) || msg.includes('available')) {
+    return "I'm available from 9am to 8pm, 7 days a week. I provide all services at your home, so just let me know what time works best for you. When would you like to schedule your treatment?";
   }
 
   // Payment questions
   if (msg.includes('pay') || msg.includes('payment') || msg.includes('cash') || msg.includes('card')) {
-    return "We accept both cash and card payments. Payment is collected after the service is completed. Would you like to make a booking?";
+    return "I accept both cash and card payments. Payment is collected after the service is completed at your home. Would you like to book a treatment?";
+  }
+
+  // Difference between basic and luxury facial
+  if ((msg.includes('difference') || msg.includes('between')) && msg.includes('facial')) {
+    return `Let me explain the difference between my facial treatments:\n\n` +
+      `✨ Basic Facial (€40 - 45 minutes):\n` +
+      `• Deep cleansing\n` +
+      `• Gentle exfoliation\n` +
+      `• Face massage\n` +
+      `• Basic moisturizing\n\n` +
+      `✨ Luxury Facial (€60 - 60 minutes):\n` +
+      `• Everything in Basic Facial, plus:\n` +
+      `• Premium products\n` +
+      `• Extended massage\n` +
+      `• Special mask treatment\n` +
+      `• Neck and shoulder massage\n\n` +
+      `Both facials are provided at your home. Which one would you prefer?`;
   }
 
   // Booking process questions
   if (msg.includes('how') && msg.includes('book')) {
-    return "Booking is simple! Just let me know:\n1. Your name\n2. The services you want\n3. Preferred date and time\n4. Your address\n5. Contact number\n\nWould you like to start booking now?";
+    return "Booking is simple! Just let me know:\n" +
+      "1. Which service you'd like\n" +
+      "2. Your preferred date and time\n" +
+      "3. Your name\n" +
+      "4. Your address\n\n" +
+      "I'll come to your home to provide the service. Would you like to book a treatment now?";
   }
 
   // Cancellation/changes questions
   if (msg.includes('cancel') || msg.includes('change') || msg.includes('reschedule')) {
-    return "You can cancel or reschedule your appointment up to 24 hours before the scheduled time. Just let us know and we'll help you with that. Would you like to make a booking?";
+    return "You can cancel or reschedule your appointment up to 24 hours before the scheduled time without any charge. Just let me know and I'll help you with that. Would you like to make a booking?";
   }
 
   return null;
@@ -907,34 +1102,76 @@ function handleSmallTalk(message) {
   return null;
 }
 
-// Enhanced chat endpoint
+// Check if message is a command
+function isCommand(message) {
+  const commands = ['reset', 'cancel', 'help', 'menu', 'services'];
+  const normalizedMsg = message.toLowerCase().trim();
+  return commands.some(cmd => normalizedMsg === cmd);
+}
+
+// Handle commands
+function handleCommand(message, booking) {
+  const normalizedMsg = message.toLowerCase().trim();
+  
+  switch (normalizedMsg) {
+    case 'reset':
+    case 'cancel':
+      return 'Booking cancelled. How can I help you today?';
+    
+    case 'help':
+      return 'I can help you book beauty services. Just tell me what service you\'d like, and I\'ll guide you through the booking process.';
+    
+    case 'menu':
+    case 'services':
+      return `Here are our services:\n\n` +
+        `💆‍♀️ Facial Treatments:\n` +
+        `• Basic Facial (€40) - 45 minutes\n` +
+        `• Luxury Facial (€60) - 60 minutes\n\n` +
+        `🧵 Threading Services:\n` +
+        `• Eyebrow Threading (€10) - 15 minutes\n` +
+        `• Full Face Threading (€25) - 30 minutes\n\n` +
+        `✨ Other Services:\n` +
+        `• Full Body Waxing (€70) - 90 minutes\n` +
+        `• Henna Design (€20–€50) - 45-60 minutes\n\n` +
+        `Which service would you like to book?`;
+    
+    default:
+      return null;
+  }
+}
+
+// Process chat endpoint
 app.post("/chat", async (req, res) => {
   try {
     const { userMessage } = req.body;
-    
-    // Reset command
-    if (userMessage.toLowerCase() === 'reset') {
-      console.log('🔄 Resetting conversation state...');
-      await saveBookingState(null);
-      res.json({ 
-        reply: "Conversation reset. How can I help you today?",
+    const normalizedMessage = userMessage.toLowerCase().trim();
+
+    // Check for general questions first
+    const questionResponse = handleGeneralQuestion(userMessage);
+    if (questionResponse) {
+      res.json({
+        reply: questionResponse,
         conversationHistory: []
       });
       return;
     }
 
-    // Handle greeting for new conversation
-    if (isGreeting(userMessage)) {
-      // Clear any existing booking state for new conversations
-      await saveBookingState(null);
-      const responses = [
-        "Hello! Welcome to Puja's Beauty Parlour. How can I assist you today?",
-        "Hi there! Thanks for reaching out. What can I help you with?",
-        "Welcome! How may I help you today?",
-        "Hello! What brings you to our beauty service today?"
-      ];
+    // Handle small talk
+    const smallTalkResponse = handleSmallTalk(userMessage);
+    if (smallTalkResponse) {
       res.json({
-        reply: responses[Math.floor(Math.random() * responses.length)],
+        reply: smallTalkResponse,
+        conversationHistory: []
+      });
+      return;
+    }
+    
+    // Reset command
+    if (normalizedMessage === 'reset') {
+      console.log('🔄 Resetting conversation state...');
+      await saveBookingState(null);
+      res.json({ 
+        reply: "Conversation reset. How can I help you today?",
         conversationHistory: []
       });
       return;
@@ -949,54 +1186,12 @@ app.post("/chat", async (req, res) => {
       address: ''
     };
 
-    // Check for general questions first
-    const questionResponse = handleGeneralQuestion(userMessage);
-    if (questionResponse) {
-      res.json({
-        reply: questionResponse,
-        conversationHistory: []
-      });
-      return;
-    }
-
-    // Check for small talk
-    const smallTalkResponse = handleSmallTalk(userMessage);
-    if (smallTalkResponse) {
-      res.json({
-        reply: smallTalkResponse,
-        conversationHistory: []
-      });
-      return;
-    }
-
-    // Handle initial booking request
-    if (userMessage.toLowerCase().includes('book')) {
-      // Clear any existing booking state when starting a new booking
-      await saveBookingState(null);
-      const responses = [
-        `I'll help you book an appointment. First, let me know which service you'd like:\n\n${Object.values(SERVICES).map(s => `• ${s.name} (${s.price})`).join('\n')}\n\nWhich service interests you?`,
-        `I'll assist you with the booking. Here are our services:\n\n${Object.values(SERVICES).map(s => `• ${s.name} (${s.price})`).join('\n')}\n\nWhich one would you like to book?`,
-        `Let's get your appointment scheduled. These are our services:\n\n${Object.values(SERVICES).map(s => `• ${s.name} (${s.price})`).join('\n')}\n\nWhich service would you prefer?`
-      ];
-      res.json({
-        reply: responses[Math.floor(Math.random() * responses.length)],
-        conversationHistory: []
-      });
-      return;
-    }
-
-    // Extract and update booking details
-    const updatedBooking = extractAndUpdateDetails(userMessage, booking);
-    const changes = Object.entries(updatedBooking).filter(([key, value]) => value !== booking[key]);
-    
-    // Save the updated booking state
-    await saveBookingState(updatedBooking);
-    
-    // Check if this is a confirmation
-    if (isConfirmation(userMessage) && isBookingComplete(updatedBooking)) {
-      const result = await processBooking(updatedBooking);
+    // If we have all booking details and user confirms
+    if (isBookingComplete(booking) && isConfirmation(userMessage)) {
+      const result = await processBooking(booking, userMessage);
       if (result.success) {
-        await saveBookingState(null); // Clear the state after successful booking
+        // Clear booking state after successful confirmation
+        await saveBookingState(null);
       }
       res.json({
         reply: result.message,
@@ -1005,76 +1200,145 @@ app.post("/chat", async (req, res) => {
       return;
     }
 
+    // Handle greeting or new conversation
+    if (isGreeting(userMessage)) {
+      const greetingResponses = [
+        "Hi! How can I help you today? 😊",
+        "Hey there! What can I assist you with? ✨",
+        "Hello! How may I help you today? 💝",
+        "Hi! What brings you here today? 🌟"
+      ];
+      
+      // Reset booking state for new conversation
+      booking = {
+        name: '',
+        services: [],
+        date: '',
+        time: '',
+        address: ''
+      };
+      await saveBookingState(booking);
+      
+      res.json({
+        reply: greetingResponses[Math.floor(Math.random() * greetingResponses.length)],
+        conversationHistory: []
+      });
+      return;
+    }
+
+    // Handle booking intent or service inquiry
+    if (normalizedMessage.includes('book') || 
+        normalizedMessage.includes('appointment') || 
+        normalizedMessage.includes('service') || 
+        normalizedMessage.includes('treatment') ||
+        normalizedMessage.includes('what') || 
+        normalizedMessage.includes('offer')) {
+      
+      const serviceMenu = `Here are my services:\n\n` +
+        `💆‍♀️ Facial Treatments:\n` +
+        `• Basic Facial (€40) - 45 minutes\n` +
+        `• Luxury Facial (€60) - 60 minutes\n\n` +
+        `🧵 Threading Services:\n` +
+        `• Eyebrow Threading (€10) - 15 minutes\n` +
+        `• Full Face Threading (€25) - 30 minutes\n\n` +
+        `✨ Other Services:\n` +
+        `• Full Body Waxing (€70) - 90 minutes\n` +
+        `• Henna Design (€20–€50) - 45-60 minutes\n\n` +
+        `Which treatment would you like?`;
+      
+      res.json({
+        reply: serviceMenu,
+        conversationHistory: []
+      });
+      return;
+    }
+
+    // Extract all possible information from the message
+    const updatedBooking = extractAndUpdateDetails(userMessage, booking);
+    await saveBookingState(updatedBooking);
+    
     // Get missing fields
     const missingFields = getMissingFields(updatedBooking);
     
-    // If booking is complete, ask for confirmation
-    if (missingFields.length === 0) {
-      const responses = [
-        `Perfect! Here's your booking summary:\n\n` +
-        `• Name: ${updatedBooking.name}\n` +
-        `• Services: ${updatedBooking.services.join(', ')}\n` +
-        `• Date: ${updatedBooking.date}\n` +
-        `• Time: ${updatedBooking.time}\n` +
-        `• Address: ${updatedBooking.address}\n\n` +
-        `Is this correct? Please say 'yes' to confirm.`,
-        
-        `Great! I've got all your details:\n\n` +
-        `• Name: ${updatedBooking.name}\n` +
-        `• Services: ${updatedBooking.services.join(', ')}\n` +
-        `• Date: ${updatedBooking.date}\n` +
-        `• Time: ${updatedBooking.time}\n` +
-        `• Address: ${updatedBooking.address}\n\n` +
-        `Would you like me to go ahead and book this for you?`
-      ];
-      res.json({
-        reply: responses[Math.floor(Math.random() * responses.length)],
-        conversationHistory: []
-      });
-      return;
-    }
+    // If we have everything and it's not a confirmation, show confirmation request
+    if (missingFields.length === 0 && !isConfirmation(userMessage)) {
+      const servicesTotal = calculateServicesTotal(updatedBooking.services);
+      const travelCharge = calculateTravelCharge(updatedBooking.address);
+      const totalCost = servicesTotal + travelCharge;
 
-    // If something was updated, acknowledge it and ask for the next field
-    if (changes.length > 0) {
-      let acknowledgment = '';
-      const [field, value] = changes[0];
+      const summary = `Perfect! Here's your booking details:\n\n` +
+        `📋 ━━━ Booking Details ━━━\n` +
+        `👤 Name: ${updatedBooking.name}\n` +
+        `💅 Services: ${updatedBooking.services.join(', ')}\n` +
+        `📅 Date: ${updatedBooking.date}\n` +
+        `⏰ Time: ${updatedBooking.time}\n` +
+        `📍 Address: ${updatedBooking.address}\n\n` +
+        `💰 Services Total: €${servicesTotal}\n` +
+        `🚗 Travel Charge: €${travelCharge}\n` +
+        `💳 Total Cost: €${totalCost}\n\n` +
+        `Does all that look good to you?`;
       
-      if (field === 'name') {
-        acknowledgment = `Hi ${value}! `;
-      } else if (field === 'services') {
-        const service = Object.values(SERVICES).find(s => s.name === value[value.length - 1]);
-        if (service) {
-          acknowledgment = `Great choice! ${service.name} costs ${service.price}. `;
-        }
-      } else if (field === 'date') {
-        acknowledgment = `Perfect! I've noted down ${value}. `;
-      } else if (field === 'time') {
-        acknowledgment = `Got it, ${value} works. `;
-      } else if (field === 'address') {
-        acknowledgment = `Thanks for providing your address. `;
-      }
-
-      const nextPrompt = getNextPrompt(updatedBooking, missingFields);
       res.json({
-        reply: acknowledgment + nextPrompt,
+        reply: summary,
+        conversationHistory: []
+      });
+      return;
+    } else if (missingFields.length === 0 && isConfirmation(userMessage)) {
+      // If it's a confirmation, just ask for final confirmation
+      res.json({
+        reply: "Would you like me to confirm this booking for you?",
         conversationHistory: []
       });
       return;
     }
 
-    // If no changes were detected, guide the user
-    const nextPrompt = getNextPrompt(updatedBooking, missingFields);
-    if (nextPrompt) {
+    // Handle service selection
+    if (updatedBooking.services.length === 0) {
+      const serviceMenu = `What treatment would you like?\n\n` +
+        `💆‍♀️ Facial Treatments:\n` +
+        `• Basic Facial (€40) - 45 minutes\n` +
+        `• Luxury Facial (€60) - 60 minutes\n\n` +
+        `🧵 Threading Services:\n` +
+        `• Eyebrow Threading (€10) - 15 minutes\n` +
+        `• Full Face Threading (€25) - 30 minutes\n\n` +
+        `✨ Other Services:\n` +
+        `• Full Body Waxing (€70) - 90 minutes\n` +
+        `• Henna Design (€20–€50) - 45-60 minutes\n\n` +
+        `You can book multiple treatments together!`;
+      
       res.json({
-        reply: nextPrompt,
+        reply: serviceMenu,
         conversationHistory: []
       });
       return;
     }
 
-    // Fallback response
+    // Get next required field
+    const nextField = missingFields[0];
+    let prompt;
+
+    switch (nextField) {
+      case 'name':
+        prompt = "Could I get your name?";
+        break;
+      case 'date':
+        prompt = "What date would you like me to come? You can say 'tomorrow', 'next Monday', or any specific date.";
+        break;
+      case 'time':
+        prompt = "What time works best for you? I'm available from 9am to 8pm.";
+        break;
+      case 'address':
+        prompt = "What's your address?";
+        break;
+      case 'phone':
+        prompt = "What's your phone number? I'll use this to send you booking confirmations via WhatsApp.";
+        break;
+      default:
+        prompt = getNextPrompt(updatedBooking, missingFields);
+    }
+
     res.json({
-      reply: "I'm not sure what you mean. Could you please rephrase that? Or if you'd like to start over, just say 'reset'.",
+      reply: prompt,
       conversationHistory: []
     });
 
@@ -1364,24 +1628,77 @@ app.post("/webhook", async (req, res) => {
 });
 
 // WhatsApp webhook endpoint
-app.post('/demo-reply', express.json(), async (req, res) => {
+app.post('/whatsapp', express.urlencoded({ extended: true }), async (req, res) => {
   try {
-    const { Body, From } = req.body;
-    console.log('📱 Received WhatsApp message:', { Body, From });
+    const { Body: message, From: from, ProfileName: name } = req.body;
+    console.log('📱 Received WhatsApp message:', { message, from, name });
 
-    // Check if this is an owner confirmation
-    if (From === process.env.OWNER_PHONE) {
-      const response = await handleOwnerConfirmation(Body);
-      return res.send(response);
+    // Create Twilio response
+    const twiml = new MessagingResponse();
+
+    // Check if this is the owner (compare full WhatsApp number)
+    const ownerNumber = `whatsapp:+${process.env.OWNER_WHATSAPP_NUMBER.replace(/^\+/, '')}`;
+    console.log('🔍 Comparing numbers:', { from, ownerNumber });
+    const isOwner = from === ownerNumber;
+
+    if (isOwner) {
+      // Handle owner's confirmation/rejection
+      const response = await handleOwnerConfirmation(message);
+      console.log('👤 Owner response:', response);
+      twiml.message(response);
+      res.type('text/xml').send(twiml.toString());
+      return;
     }
 
-    // For all other messages, send a default response
-    const twiml = new MessagingResponse();
-    twiml.message('Thank you for your message. Please use our booking system to schedule appointments.');
+    // For customers, process the message through our booking system
+    const userPhone = from.replace('whatsapp:', '');
+    
+    // Load or create booking state
+    let bookingState = await getBookingState(userPhone) || {
+      name: name || '',
+      services: [],
+      phone: userPhone
+    };
+
+    console.log('📝 Current booking state:', bookingState);
+
+    // If it's a greeting and no booking exists, show services menu
+    if (isGreeting(message) && (!bookingState || bookingState.services.length === 0)) {
+      console.log('👋 Sending welcome message and services menu');
+      const servicesMenu = `👋 Hi${name ? ' ' + name : ''}! Welcome to Puja's Beauty Parlour!\n\nI can help you book any of these services:\n\n` +
+        `💆‍♀️ Facial Treatments:\n` +
+        `• Basic Facial (€40) - 45 minutes\n` +
+        `• Luxury Facial (€60) - 60 minutes\n\n` +
+        `🧵 Threading Services:\n` +
+        `• Eyebrow Threading (€10) - 15 minutes\n` +
+        `• Full Face Threading (€25) - 30 minutes\n\n` +
+        `✨ Other Services:\n` +
+        `• Full Body Waxing (€70) - 90 minutes\n` +
+        `• Henna Design (€20–€50) - 45-60 minutes\n\n` +
+        `Which service would you like to book?`;
+      twiml.message(servicesMenu);
+    } else {
+      // Process the message
+      const response = await processMessage(message, bookingState);
+      console.log('🤖 Bot response:', response);
+      
+      // Save the updated state
+      if (response.booking) {
+        bookingState = response.booking;
+        await saveBookingState(userPhone, bookingState);
+      }
+
+      twiml.message(response.message || response);
+    }
+    
+    console.log('📤 Sending response to WhatsApp');
     res.type('text/xml').send(twiml.toString());
+
   } catch (error) {
-    console.error('❌ WhatsApp webhook error:', error);
-    res.status(500).send('Error processing WhatsApp message');
+    console.error('❌ Error processing WhatsApp message:', error);
+    const twiml = new MessagingResponse();
+    twiml.message('Sorry, I encountered an error. Please try again.');
+    res.type('text/xml').send(twiml.toString());
   }
 });
 
@@ -1408,14 +1725,15 @@ async function handleOwnerConfirmation(message) {
       await saveBooking(bookingId, booking);
 
       // Send confirmation to customer
-      const customerMsg = `🎉 Great news! Your appointment has been confirmed:\n\n` +
+      const customerMsg = `🎉 Great news! Your appointment has been confirmed by Puja:\n\n` +
         `📅 Services: ${booking.services.join(', ')}\n` +
         `📆 Date: ${booking.date}\n` +
         `⏰ Time: ${booking.time}\n` +
         `📍 Address: ${booking.address}\n` +
         `• Phone: ${booking.phone}\n\n` +
-        `We look forward to seeing you! If you need to reschedule, please contact us at least 24 hours in advance.\n\n` +
-        `💝 Puja's Beauty Parlour`;
+        `I look forward to seeing you! If you need to reschedule, please contact me at least 24 hours in advance.\n\n` +
+        `See you there! 💝\n` +
+        `- Puja`;
 
       await sendWhatsAppMessage(booking.phone, customerMsg);
       
@@ -1427,13 +1745,13 @@ async function handleOwnerConfirmation(message) {
       await saveBooking(bookingId, booking);
 
       // Send rejection to customer
-      const customerMsg = `We apologize, but we are unable to accommodate your appointment request for:\n\n` +
+      const customerMsg = `Hi, this is Puja. I apologize, but I won't be able to accommodate your appointment request for:\n\n` +
         `📅 Services: ${booking.services.join(', ')}\n` +
         `📆 Date: ${booking.date}\n` +
-        `⏰ Time: ${booking.time}\n` +
-        `• Phone: ${booking.phone}\n\n` +
-        `Please try booking for a different time or contact us directly for assistance.\n\n` +
-        `💝 Puja's Beauty Parlour`;
+        `⏰ Time: ${booking.time}\n\n` +
+        `Please try booking for a different time or contact me directly and I'll help you find a suitable slot.\n\n` +
+        `Thank you for understanding! 💝\n` +
+        `- Puja`;
 
       await sendWhatsAppMessage(booking.phone, customerMsg);
       
@@ -1539,4 +1857,41 @@ function normalizeHistory(history = []) {
     role: msg.role || 'user',
     parts: [{ text: msg.parts?.[0]?.text || msg.text || '' }]
   }));
+}
+
+// Calculate services total
+function calculateServicesTotal(services) {
+  return services.reduce((total, service) => {
+    const serviceInfo = Object.values(SERVICES).find(s => s.name === service);
+    if (serviceInfo) {
+      const price = parseInt(serviceInfo.price.replace('€', ''));
+      return total + (isNaN(price) ? 0 : price);
+    }
+    return total;
+  }, 0);
+}
+
+// Extract phone number from message
+function extractPhoneNumber(message) {
+  // Remove any non-numeric characters except + for international format
+  const cleaned = message.replace(/[^\d+]/g, '');
+  
+  // Check for Irish phone number patterns
+  const patterns = [
+    /^(\+353|00353)8[35679]\d{7}$/, // International format: +353 8X XXX XXXX
+    /^08[35679]\d{7}$/ // National format: 08X XXX XXXX
+  ];
+  
+  for (const pattern of patterns) {
+    const match = cleaned.match(pattern);
+    if (match) {
+      // Convert to international format if needed
+      if (match[0].startsWith('0')) {
+        return '+353' + match[0].substring(1);
+      }
+      return match[0];
+    }
+  }
+  
+  return null;
 }
