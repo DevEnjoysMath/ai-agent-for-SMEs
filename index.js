@@ -33,17 +33,77 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Twilio webhook signature validation middleware
+function validateTwilioRequest(req, res, next) {
+  // Skip validation in development if explicitly disabled
+  if (process.env.NODE_ENV === 'development' && process.env.SKIP_TWILIO_VALIDATION === 'true') {
+    console.log('⚠️ Skipping Twilio validation (development mode)');
+    return next();
+  }
+
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  if (!authToken) {
+    console.error('❌ TWILIO_AUTH_TOKEN not set - cannot validate webhook');
+    return res.status(500).json({ error: 'Server configuration error' });
+  }
+
+  // Get the Twilio signature from the request header
+  const twilioSignature = req.headers['x-twilio-signature'];
+  if (!twilioSignature) {
+    console.error('❌ No Twilio signature found in request');
+    return res.status(403).json({ error: 'Forbidden - No signature' });
+  }
+
+  // Construct the full URL (important for signature validation)
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  const url = `${protocol}://${host}${req.originalUrl}`;
+
+  // Validate the request
+  const requestIsValid = twilio.validateRequest(
+    authToken,
+    twilioSignature,
+    url,
+    req.body
+  );
+
+  if (!requestIsValid) {
+    console.error('❌ Invalid Twilio signature');
+    console.error('URL:', url);
+    console.error('Signature:', twilioSignature);
+    return res.status(403).json({ error: 'Forbidden - Invalid signature' });
+  }
+
+  console.log('✅ Twilio signature validated');
+  next();
+}
+
+// Validate required environment variables
+const requiredEnvVars = [
+  'TWILIO_ACCOUNT_SID',
+  'TWILIO_AUTH_TOKEN',
+  'OWNER_PHONE',
+  'WHATSAPP_NUMBER'
+];
+
+const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
+if (missingEnvVars.length > 0) {
+  console.error('❌ Missing required environment variables:', missingEnvVars.join(', '));
+  console.error('Please copy .env.example to .env and fill in your credentials');
+  process.exit(1);
+}
+
 // Load business info from environment variables
 let businessInfo = {
-  name: process.env.BUSINESS_NAME || "Puja's Beauty Parlour",
-  service_area: process.env.SERVICE_AREA || "Dublin – Home Service Only",
-  phone: process.env.BUSINESS_PHONE || "+353 85 808 8578",
+  name: process.env.BUSINESS_NAME || "Beauty Parlour",
+  service_area: process.env.SERVICE_AREA || "Home Service",
+  phone: process.env.BUSINESS_PHONE || process.env.OWNER_PHONE,
   hours: process.env.BUSINESS_HOURS || "Mon–Sun: 9am–10pm",
   owner: {
-    name: process.env.OWNER_NAME || "Puja",
-    phone: process.env.OWNER_PHONE || "+353858088571"
+    name: process.env.OWNER_NAME || "Owner",
+    phone: process.env.OWNER_PHONE
   },
-  whatsapp: process.env.WHATSAPP_NUMBER || "+14155238886",
+  whatsapp: process.env.WHATSAPP_NUMBER,
   services: [
     { name: "Eyebrow Threading", price: "€10" },
     { name: "Full Face Threading", price: "€25" },
@@ -1140,6 +1200,103 @@ function handleCommand(message, booking) {
   }
 }
 
+// ============================================================================
+// Health Check & Monitoring Endpoints
+// ============================================================================
+
+// Basic health check endpoint (for load balancers, uptime monitors)
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
+// Detailed status endpoint (for monitoring dashboards)
+app.get('/status', async (req, res) => {
+  try {
+    // Check critical services
+    const status = {
+      status: 'operational',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      environment: process.env.NODE_ENV || 'development',
+      version: '1.0.0',
+      services: {
+        twilio: {
+          status: twilioClient ? 'configured' : 'not_configured',
+          configured: !!process.env.TWILIO_ACCOUNT_SID
+        },
+        googleCalendar: {
+          status: calendar ? 'configured' : 'not_configured',
+          configured: !!process.env.GOOGLE_SERVICE_ACCOUNT_KEY
+        },
+        geminiAI: {
+          status: process.env.GEMINI_API_KEY ? 'configured' : 'not_configured',
+          configured: !!process.env.GEMINI_API_KEY
+        }
+      },
+      system: {
+        nodeVersion: process.version,
+        platform: process.platform,
+        memory: {
+          total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + ' MB',
+          used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + ' MB',
+          percentage: Math.round((process.memoryUsage().heapUsed / process.memoryUsage().heapTotal) * 100) + '%'
+        },
+        cpuUsage: process.cpuUsage()
+      }
+    };
+
+    // Check if any critical service is not configured
+    const allConfigured = Object.values(status.services).every(s => s.configured);
+    if (!allConfigured) {
+      status.status = 'degraded';
+      status.warning = 'Some services are not configured';
+    }
+
+    res.status(200).json(status);
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      error: 'Failed to retrieve status',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Readiness check (Kubernetes-style)
+app.get('/ready', async (req, res) => {
+  try {
+    // Check if all required services are ready
+    const isReady = twilioClient && process.env.OWNER_PHONE && process.env.WHATSAPP_NUMBER;
+
+    if (isReady) {
+      res.status(200).json({
+        ready: true,
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      res.status(503).json({
+        ready: false,
+        timestamp: new Date().toISOString(),
+        message: 'Service not ready - missing required configuration'
+      });
+    }
+  } catch (error) {
+    res.status(503).json({
+      ready: false,
+      timestamp: new Date().toISOString(),
+      error: error.message
+    });
+  }
+});
+
+// ============================================================================
+// Main Application Routes
+// ============================================================================
+
 // Process chat endpoint
 app.post("/chat", async (req, res) => {
   try {
@@ -1562,7 +1719,7 @@ app.post("/confirm", async (req, res) => {
 });
 
 // Twilio webhook for handling owner's responses
-app.post("/webhook", async (req, res) => {
+app.post("/webhook", validateTwilioRequest, async (req, res) => {
   try {
     const { Body: message, From: from } = req.body;
     console.log('📱 Received webhook:', { message, from });
@@ -1628,7 +1785,7 @@ app.post("/webhook", async (req, res) => {
 });
 
 // WhatsApp webhook endpoint
-app.post('/whatsapp', express.urlencoded({ extended: true }), async (req, res) => {
+app.post('/whatsapp', validateTwilioRequest, async (req, res) => {
   try {
     const { Body: message, From: from, ProfileName: name } = req.body;
     console.log('📱 Received WhatsApp message:', { message, from, name });
