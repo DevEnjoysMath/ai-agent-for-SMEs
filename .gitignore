@@ -19,11 +19,18 @@ pids
 google-calendar-service-account.json
 businessInfo.json
 
-# Directory for storing booking data
+# Directory for storing booking data (contains customer PII)
 bookings/
+confirm/
 states/
 confirmed/
 rejected/
+
+# Binaries and platform-specific executables
+ngrok
+ngrok-*
+*.tgz
+*.tar.gz
 
 # OS generated files
 .DS_Store

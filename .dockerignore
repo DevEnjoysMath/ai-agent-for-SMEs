@@ -1,0 +1,74 @@
+# Dependencies
+node_modules
+npm-debug.log
+yarn-error.log
+package-lock.json
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Credentials
+google-calendar-service-account.json
+businessInfo.json
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+!README.md
+LICENSE
+
+# Customer data (should be in volumes)
+bookings/*
+confirm/*
+states/*
+rejected/*
+confirmed/*
+
+# Logs
+logs
+*.log
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Test files
+test-*.js
+*.test.js
+*.spec.js
+
+# Binaries
+ngrok
+ngrok-*
+*.tgz
+*.tar.gz
+
+# CI/CD
+.github
+.gitlab-ci.yml
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Misc
+TODO.md
+NOTES.md
+.editorconfig
