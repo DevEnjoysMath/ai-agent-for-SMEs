@@ -13,11 +13,24 @@ const { MessagingResponse } = require('twilio').twiml;
 const app = express();
 const port = process.env.PORT || 5001;
 
-// Initialize Twilio client
-const twilioClient = twilio(
-  process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN
-);
+// Initialize Twilio client (optional for testing)
+let twilioClient;
+try {
+  if (process.env.TWILIO_ACCOUNT_SID &&
+      process.env.TWILIO_ACCOUNT_SID.startsWith('AC') &&
+      process.env.TWILIO_AUTH_TOKEN) {
+    twilioClient = twilio(
+      process.env.TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_AUTH_TOKEN
+    );
+    console.log('✅ Twilio client initialized');
+  } else {
+    console.log('⚠️  Twilio not configured - WhatsApp features disabled');
+  }
+} catch (error) {
+  console.warn('⚠️  Failed to initialize Twilio:', error.message);
+  twilioClient = null;
+}
 
 // Service definitions with proper mapping
 const SERVICES = {
@@ -86,11 +99,11 @@ const requiredEnvVars = [
   'WHATSAPP_NUMBER'
 ];
 
-const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
+const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName] || process.env[varName].startsWith('your_'));
 if (missingEnvVars.length > 0) {
-  console.error('❌ Missing required environment variables:', missingEnvVars.join(', '));
-  console.error('Please copy .env.example to .env and fill in your credentials');
-  process.exit(1);
+  console.warn('⚠️  Some environment variables are not configured:', missingEnvVars.join(', '));
+  console.warn('⚠️  WhatsApp features will be disabled. Configure .env for full functionality.');
+  console.warn('ℹ️  You can still test the chat interface at http://localhost:' + (process.env.PORT || 5001) + '/agent.html\n');
 }
 
 // Load business info from environment variables
@@ -1199,6 +1212,28 @@ function handleCommand(message, booking) {
       return null;
   }
 }
+
+// ============================================================================
+// Static Files & Web Interface
+// ============================================================================
+
+// Serve static files from the current directory
+app.use(express.static(__dirname));
+
+// Root redirect to agent interface
+app.get('/', (req, res) => {
+  res.redirect('/agent.html');
+});
+
+// Agent chat interface
+app.get('/agent', (req, res) => {
+  res.sendFile(path.join(__dirname, 'agent.html'));
+});
+
+// Sales pitch page
+app.get('/sales', (req, res) => {
+  res.sendFile(path.join(__dirname, 'sales-pitch.html'));
+});
 
 // ============================================================================
 // Health Check & Monitoring Endpoints
